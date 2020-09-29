@@ -1,0 +1,6 @@
+(library
+ (name sioc_lwt_stream)
+ (public_name sioc-lwt_stream)
+ (modules sioc_lwt_stream)
+ (libraries sioc lwt)
+ (preprocess (pps lwt_ppx)))

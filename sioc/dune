@@ -1,0 +1,6 @@
+(library
+ (name sioc)
+ (public_name sioc)
+ (modules sioc)
+ (libraries lwt fmt base64)
+ (preprocess (pps lwt_ppx)))

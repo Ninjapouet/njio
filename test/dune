@@ -1,0 +1,5 @@
+(test
+ (name test)
+ (libraries sioc_lwt_stream fmt lwt.unix)
+ (preprocess (pps lwt_ppx))
+)
