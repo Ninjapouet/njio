@@ -174,11 +174,14 @@ type 'a mode =
   | WO : wo mode
   | RW : rw mode
 
+type ('a, 'b) codec
 
-class type ['a, 'b] codec = object
-  method encode : 'a -> 'b
-  method decode : 'b -> 'a
-end
+val codec : ('a -> 'b) -> ('b -> 'a) -> ('a, 'b) codec
+val filter : ('a -> 'b option) -> ('b -> 'a option) -> ('a, 'b) codec
+
+val id : unit -> ('a, 'a) codec
+val marshal : ?extern_flags:Marshal.extern_flags list  -> unit -> ('a, string) codec
+val base64 : ?pad:bool -> ?alphabet:Base64.alphabet -> unit -> (string, string) codec
 
 (** {2 IO interface}
 
@@ -211,13 +214,8 @@ module type S = sig
   val fold_s : ('a -> 'b -> 'a Lwt.t) -> 'a -> ('b, _ r) t -> 'a Lwt.t
 
 
-  val codec : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t
-  val trap : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t * ('b * exn, ro) t * ('a * exn, ro) t
+  val map : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t
   val multiplex : ('a, int) codec -> int -> ('a * 'b, 'c) t * ('b, 'c) t array
 end
 
 module Make (S : STREAM) : S with type 'a stream = 'a S.t
-
-class ['a] marshal : ?extern_flags:Marshal.extern_flags list  -> unit -> [string, 'a] codec
-val id : ('a, 'a) codec
-class base64 : ?pad:bool -> ?alphabet:Base64.alphabet -> unit -> [string, string] codec

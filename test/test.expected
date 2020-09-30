@@ -12,9 +12,6 @@
 "4"
 "2"
 "6"
-45
-error: "foo" Failure("int_of_string")
-76
 channel 2: 42
 mux (0, 32)
 channel 1: 17

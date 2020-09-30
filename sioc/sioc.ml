@@ -41,26 +41,31 @@ type 'a mode =
   | WO : wo mode
   | RW : rw mode
 
-class type ['a, 'b] codec = object
-  method encode : 'a -> 'b
-  method decode : 'b -> 'a
-end
+type ('a, 'b) codec =
+  | Codec : ('a -> 'b) * ('b -> 'a) -> ('a, 'b) codec
+  | Filter : ('a -> 'b option) * ('b -> 'a option) -> ('a, 'b) codec
 
-class ['a] marshal ?(extern_flags = []) () : [string, 'a] codec = object
-  method encode s =  Marshal.from_string s 0
-  method decode a =  Marshal.to_string a extern_flags
-end
+let codec : ('a -> 'b) -> ('b -> 'a) -> ('a, 'b) codec =
+  fun e d -> Codec (e, d)
 
-let id : ('a, 'a) codec = object
-  method encode x = x
-  method decode x = x
-end
+let filter : ('a -> 'b option) -> ('b -> 'a option) -> ('a, 'b) codec =
+  fun e d -> Filter (e, d)
 
-class base64 : ?pad:bool -> ?alphabet:Base64.alphabet -> unit -> [string, string] codec =
-  fun ?pad ?alphabet () -> object
-  method encode s = Base64.encode_exn ?pad ?alphabet s
-  method decode s = Base64.decode_exn ?pad ?alphabet s
-end
+let marshal ?(extern_flags = []) () =
+  let encode a = Marshal.to_string a extern_flags in
+  let decode s = Marshal.from_string s 0 in
+  codec encode decode
+
+let id () =
+  let id x = x in
+  codec id id
+
+let base64 :
+  ?pad:bool -> ?alphabet:Base64.alphabet -> unit -> (string, string) codec =
+  fun ?pad ?alphabet () ->
+  let encode s = Base64.encode_exn ?pad ?alphabet s in
+  let decode s = Base64.decode_exn ?pad ?alphabet s in
+  codec encode decode
 
 module type S = sig
   type ('a, 'b) t
@@ -88,9 +93,7 @@ module type S = sig
   val fold : ('a -> 'b -> 'a) -> 'a -> ('b, _ r) t -> 'a Lwt.t
   val fold_s : ('a -> 'b -> 'a Lwt.t) -> 'a -> ('b, _ r) t -> 'a Lwt.t
 
-  val codec : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t
-  val trap :  ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t * ('b * exn, ro) t * ('a * exn, ro) t
-
+  val map : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t
   val multiplex : ('a, int) codec -> int -> ('a * 'b, 'c) t * ('b, 'c) t array
 end
 
@@ -129,20 +132,17 @@ module Make (S : STREAM) = struct
 
   let output a io = io.output a
 
-  let codec : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t = fun c s -> {
-      input = S.map c#decode s.input;
-      output = fun a -> s.output (c#encode a);
-    }
-
-  let trap : ('a, 'b) codec -> ('b, 'c) t -> ('a, 'c) t * ('b * exn, ro) t * ('a * exn, ro) t =
-    fun c s ->
-    let a_stream, a_push = S.push () in
-    let b_stream, b_push = S.push () in
-    let output a = try s.output (c#encode a) with e -> a_push (Some (a, e)) in
-    let decode (b : 'b) = try Some (c#decode b) with e -> b_push (Some (b, e)); None in
-    let input = S.fmap decode s.input in
-    let s = {input; output} in
-    s, make RO (I b_stream), make RO (I a_stream)
+  let map : type a b. (a, b) codec -> (b, 'c) t -> (a, 'c) t = fun c s ->
+    match c with
+    | Codec (encode, decode) -> {
+        input = S.map decode s.input;
+        output = fun a -> s.output (encode a);
+      }
+    | Filter (encode, decode) ->
+      let output a = match encode a with None -> () | Some v -> s.output v in {
+        input = S.fmap decode s.input;
+        output;
+      }
 
   let next io = S.next io.input
 
@@ -153,20 +153,25 @@ module Make (S : STREAM) = struct
   let fold f a io = S.fold f a io.input
   let fold_s f a io = S.fold_s f a io.input
 
-  let multiplex : ('a, int) codec -> int -> ('a * 'b, 'c) t * ('b, 'c) t array = fun c max ->
-    let r = Array.init max (fun _ -> push ()) in
+  let multiplex : ('a, int) codec -> int -> ('a * 'b, 'c) t * ('b, 'c) t array =
+    fun c max ->
     let l, l_push = push () in
-    let to_i, of_i = c#encode, c#decode in
-    let output_right (a, b) =
-      let i = to_i a in
-      if i >= 0 && i < max then
-        (snd r.(i)) (Some b)
-      else
-        invalid_arg "multiplex: encode" in
-    let output_left i b = l_push (Some (of_i i, b)) in
-    let left = {input = l; output = output_right} in
-    let rights = Array.mapi (fun i (r, _) -> {input = r; output = output_left i}) r in
-    left, rights
-
+    let r = Array.init max (fun _ -> push ()) in
+    let to_i, of_i = match c with
+      | Codec (to_i, of_i) -> (fun a -> Some (to_i a)), (fun i -> Some (of_i i))
+      | Filter (to_i, of_i) -> to_i, of_i in
+    let output_right (a, b) = match to_i a with
+      | Some n when n >= 0 && n < max -> Some b |> snd r.(n)
+      | _ -> () in
+    let output_left i b = match of_i i with
+      | Some n -> l_push (Some (n, b))
+      | _ -> () in
+    let multiplexed = {
+      input = l;
+      output = output_right;
+    } in
+    let rights = Array.mapi
+        (fun i (r, _) -> {input = r; output = output_left i}) r in
+    multiplexed, rights
 
 end

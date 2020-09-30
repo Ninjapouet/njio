@@ -29,36 +29,18 @@ let _ = Lwt_main.run begin
     print res;
 
     (* codec *)
-    let c = object
-      method encode = int_of_string
-      method decode = string_of_int
-    end in
-    let s = codec c (make RO (I (Lwt_stream.of_list [4; 2; 6]))) in
+    let c = Sioc.codec int_of_string string_of_int in
+    let s = map c (make RO (I (Lwt_stream.of_list [4; 2; 6]))) in
     iter (Fmt.pr "\"%s\"@.") s;%lwt
 
-
-    (* trap *)
-    let c = object
-      method encode = string_of_int
-      method decode = int_of_string
-    end in
-    let stream, write = push () in
-    let s, str, _ = trap c (make RO (I stream)) in
-    Lwt.async (fun () -> iter print s);
-    Lwt.async (fun () -> iter (fun (s, e) -> Fmt.pr "error: \"%s\" %a@." s Fmt.exn e) str);
-    write (Some "45");
-    write (Some "foo");
-    write (Some "76");
-
-
     (* multiplex *)
-    let l, r = multiplex Sioc.id 3 in
-    Array.iteri (fun i io -> Lwt.async (fun () -> iter (Fmt.pr "channel %i: %i@." i) io)) r;
-    Lwt.async (fun () -> iter (fun (a, b) -> Fmt.pr "mux (%i, %i)@." a b) l);
-    output (2, 42) l;
-    output 32 r.(0);
-    output (1, 17) l;
-    output 23 r.(1);
+    let multiplexed, ios = multiplex (Sioc.id ()) 3 in
+    Array.iteri (fun i io -> Lwt.async (fun () -> iter (Fmt.pr "channel %i: %i@." i) io)) ios;
+    Lwt.async (fun () -> iter (fun (a, b) -> Fmt.pr "mux (%i, %i)@." a b) multiplexed);
+    output (2, 42) multiplexed;
+    output 32 ios.(0);
+    output (1, 17) multiplexed;
+    output 23 ios.(1);
 
     Lwt.return_unit
 
