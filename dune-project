@@ -8,7 +8,7 @@
 
 (generate_opam_files true)
 
-(version 0.2.0)
+(version 0.2.1)
 
 (source (github Ninjapouet/sioc))
 
@@ -22,6 +22,7 @@
   (fmt (>= 0.8.8))
   (base64 (>= 3.4.0))
   (lwt (>= 5.3.0))
+  (lwt_ppx (>= 2.0.1))
  )
  (tags ("io", "combinators", "stream"))
  (license "Apache 2.0")
@@ -33,7 +34,7 @@
  (name sioc-lwt_stream)
  (synopsis "Lwt_stream implementation of sioc combinators")
  (depends
-  (sioc (= 0.2.0))
+  (sioc (= 0.2.1))
  )
  (tags ("io", "combinators", "stream", "lwt"))
  (license "Apache 2.0")
